@@ -1,7 +1,7 @@
 {
-  "versionCode": 1571014,
-  "versionName": "1.5",
-  "url": "https://github.com/ivan03011995-del/GlazAI/releases/download/1.1.5/app-debug.apk",
-  "description": "Подписи кнопок для TalkBack",
+  "versionCode": 1571203,
+  "versionName": "1.5.1",
+  "url": "https://github.com/ivan03011995-del/GlazAI/releases/download/1.5/app-debug.apk",
+  "description": "исправлен баг с talkback, API ключ теперь вне доступа apk файла.",
   "isCritical": false
 }
