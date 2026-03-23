@@ -1,7 +1,7 @@
 {
-  "versionCode": 1571225,
+  "versionCode": 1571231,
   "versionName": "1.5",
   "url": "https://github.com/ivan03011995-del/GlazAI/releases/download/1.6/app-debug.apk",
-  "description": "Исправлен баг с TalkBack, API ключ теперь на сервере.",
+  "description": "Исправлено получение versionCode на Android 11+",
   "isCritical": false
 }
