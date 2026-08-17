@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Mini Skyrim Web Prototype</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Courier New', Courier, monospace; }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; width: 20px; height: 20px;
+            background: transparent; border: 2px solid white; border-radius: 50%;
+            transform: translate(-50%, -50%); pointer-events: none; z-index: 10;
+        }
+        #ui {
+            position: absolute; top: 10px; left: 10px; color: white;
+            background: rgba(0, 0, 0, 0.5); padding: 10px; border-radius: 5px;
+            pointer-events: none; user-select: none;
+        }
+        #blocker {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.5); display: flex;
+            align-items: center; justify-content: center; z-index: 20;
+        }
+        #instructions {
+            color: white; text-align: center; cursor: pointer;
+        }
+        h1 { margin: 0; font-size: 24px; text-shadow: 2px 2px 4px #000; }
+        p { font-size: 16px; }
+    </style>
+</head>
+<body>
+
+<div id="crosshair"></div>
+<div id="ui">
+    <h2>Статус героя</h2>
+    <p>Здоровье: <span id="hp">100</span>%</p>
+    <p>Предметы: <span id="items">0</span></p>
+    <p>Координаты: <span id="coords">0, 0, 0</span></p>
+</div>
+
+<div id="blocker">
+    <div id="instructions">
+        <h1>Добро пожаловать в Мини-Скайрим</h1>
+        <p>Кликните, чтобы начать</p>
+        <p>(W, A, S, D = Движение, SPACE = Прыжок, Мышь = Обзор)</p>
+        <p>E = Взаимодействие (собирать кристаллы)</p>
+    </div>
+</div>
+
+<!-- Подключаем Three.js через CDN -->
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+    let camera, scene, renderer, controls;
+    let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+    let canJump = false;
+    let prevTime = performance.now();
+    const velocity = new THREE.Vector3();
+    const direction = new THREE.Vector3();
+    
+    let itemsCollected = 0;
+    const interactables = [];
+
+    init();
+    animate();
+
+    function init() {
+        // Сцена и туман для атмосферы
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); // Небо
+        scene.fog = new THREE.Fog(0x87CEEB, 0, 750);
+
+        // Камера
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1000);
+        camera.position.y = 10;
+
+        // Свет
+        const light = new THREE.HemisphereLight(0xeeeeff, 0x777788, 0.75);
+        light.position.set(0.5, 1, 0.75);
+        scene.add(light);
+        
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(100, 100, 50);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        // Управление
+        controls = new PointerLockControls(camera, document.body);
+
+        const blocker = document.getElementById('blocker');
+        const instructions = document.getElementById('instructions');
+
+        instructions.addEventListener('click', () => {
+            controls.lock();
+        });
+
+        controls.addEventListener('lock', () => {
+            instructions.style.display = 'none';
+            blocker.style.display = 'none';
+        });
+
+        controls.addEventListener('unlock', () => {
+            blocker.style.display = 'flex';
+            instructions.style.display = '';
+        });
+
+        scene.add(controls.getObject());
+
+        // Обработчики клавиш
+        const onKeyDown = (event) => {
+            switch (event.code) {
+                case 'ArrowUp': case 'KeyW': moveForward = true; break;
+                case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
+                case 'ArrowDown': case 'KeyS': moveBackward = true; break;
+                case 'ArrowRight': case 'KeyD': moveRight = true; break;
+                case 'Space': if (canJump === true) velocity.y += 350; canJump = false; break;
+                case 'KeyE': interact(); break;
+            }
+        };
+
+        const onKeyUp = (event) => {
+            switch (event.code) {
+                case 'ArrowUp': case 'KeyW': moveForward = false; break;
+                case 'ArrowLeft': case 'KeyA': moveLeft = false; break;
+                case 'ArrowDown': case 'KeyS': moveBackward = false; break;
+                case 'ArrowRight': case 'KeyD': moveRight = false; break;
+            }
+        };
+
+        document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('keyup', onKeyUp);
+
+        // Генерация мира (Ландшафт)
+        const floorGeometry = new THREE.PlaneGeometry(2000, 2000, 100, 100);
+        floorGeometry.rotateX(-Math.PI / 2);
+        
+        // Добавляем немного шума вершинам для холмов
+        const positions = floorGeometry.attributes.position.array;
+        for (let i = 0; i < positions.length; i += 3) {
+            const x = positions[i];
+            const z = positions[i + 2];
+            // Простая волновая функция для холмов
+            positions[i + 1] = Math.sin(x / 50) * 10 + Math.cos(z / 50) * 10; 
+        }
+        floorGeometry.computeVertexNormals();
+
+        const floorMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x3b5e2b, // Трава
+            roughness: 0.8,
+            metalness: 0.2
+        });
+        const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+        scene.add(floor);
+
+        // Добавляем "деревья" (конусы) и "кристаллы" (икосаэдры)
+        const treeGeo = new THREE.ConeGeometry(5, 20, 8);
+        const treeMat = new THREE.MeshStandardMaterial({ color: 0x2d4c1e });
+        
+        const crystalGeo = new THREE.IcosahedronGeometry(2, 0);
+        const crystalMat = new THREE.MeshStandardMaterial({ 
+            color: 0x00ffff, 
+            emissive: 0x0088aa,
+            emissiveIntensity: 0.5,
+            roughness: 0.1
+        });
+
+        for (let i = 0; i < 300; i++) {
+            const x = Math.random() * 1600 - 800;
+            const z = Math.random() * 1600 - 800;
+            
+            // Находим высоту земли в этой точке (упрощенно)
+            const y = Math.sin(x / 50) * 10 + Math.cos(z / 50) * 10;
+
+            if (Math.random() > 0.95) {
+                // Кристалл (редкий предмет)
+                const crystal = new THREE.Mesh(crystalGeo, crystalMat);
+                crystal.position.set(x, y + 5, z);
+                crystal.userData = { type: 'crystal', active: true };
+                scene.add(crystal);
+                interactables.push(crystal);
+            } else {
+                // Дерево
+                const tree = new THREE.Mesh(treeGeo, treeMat);
+                tree.position.set(x, y + 10, z);
+                tree.scale.setScalar(0.5 + Math.random());
+                scene.add(tree);
+            }
+        }
+
+        // Рендерер
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        window.addEventListener('resize', onWindowResize);
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function interact() {
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+        
+        const intersects = raycaster.intersectObjects(interactables);
+
+        if (intersects.length > 0 && intersects[0].distance < 20) {
+            const obj = intersects[0].object;
+            if (obj.userData.active) {
+                obj.userData.active = false;
+                obj.visible = false;
+                itemsCollected++;
+                document.getElementById('items').innerText = itemsCollected;
+                
+                // Эффект сбора (простое сообщение в консоль или логика)
+                console.log("Подобрал кристалл!");
+            }
+        }
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        const time = performance.now();
+        const delta = (time - prevTime) / 1000;
+
+        if (controls.isLocked === true) {
+            // Физика движения
+            velocity.x -= velocity.x * 10.0 * delta;
+            velocity.z -= velocity.z * 10.0 * delta;
+            velocity.y -= 9.8 * 100.0 * delta; // Гравитация
+
+            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.x = Number(moveRight) - Number(moveLeft);
+            direction.normalize();
+
+            if (moveForward || moveBackward) velocity.z -= direction.z * 400.0 * delta;
+            if (moveLeft || moveRight) velocity.x -= direction.x * 400.0 * delta;
+
+            controls.moveRight(-velocity.x * delta);
+            controls.moveForward(-velocity.z * delta);
+            
+            controls.getObject().position.y += (velocity.y * delta);
+
+            // Простая коллизия с полом
+            const currentHeight = Math.sin(controls.getObject().position.x / 50) * 10 + Math.cos(controls.getObject().position.z / 50) * 10;
+            
+            if (controls.getObject().position.y < currentHeight + 10) {
+                velocity.y = 0;
+                controls.getObject().position.y = currentHeight + 10;
+                canJump = true;
+            }
+            
+            // Обновление UI координат
+            const pos = controls.getObject().position;
+            document.getElementById('coords').innerText = 
+                `${Math.round(pos.x)}, ${Math.round(pos.y)}, ${Math.round(pos.z)}`;
+
+            // Анимация кристаллов
+            interactables.forEach(obj => {
+                if (obj.userData.active) {
+                    obj.rotation.y += delta;
+                    obj.rotation.z += delta * 0.5;
+                }
+            });
+        }
+
+        prevTime = time;
+        renderer.render(scene, camera);
+    }
+</script>
+</body>
+</html>
